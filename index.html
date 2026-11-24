@@ -31,7 +31,8 @@
   .filtri .nav-link { white-space: nowrap; background: none; border: 0; }
   .filtri .nav-link .conta { font-size: .75rem; font-weight: 400; color: #5d7083; margin-left: 4px; }
 
-  .barra-stato { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .barra-stato { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+  #errori ul { margin: 8px 0 0; padding-left: 20px; font-size: .875rem; }
 
   /* Card notizia */
   .card-wrapper.card-space { padding-bottom: 24px; }
@@ -88,8 +89,8 @@
 
 <main class="container py-4" id="contenuto">
   <div class="barra-stato mb-3">
-    <p class="mb-0 small text-secondary" id="aggiornato" aria-live="polite">Caricamento in corso…</p>
     <button type="button" class="btn btn-outline-primary btn-sm" id="ricarica">Aggiorna</button>
+    <a class="btn btn-primary btn-sm" href="ascolta.html">Ascolta</a>
   </div>
 
   <div class="alert alert-warning" role="alert" id="errori" hidden></div>
@@ -216,7 +217,6 @@ const fmtHM = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-dig
 const fmtGiornoOra = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 async function carica() {
-  $("aggiornato").textContent = "Caricamento in corso…";
   $("ricarica").disabled = true;
   const chiavi = Object.keys(FONTI);
   const ris = await Promise.allSettled(chiavi.map(caricaFonte));
@@ -224,7 +224,7 @@ async function carica() {
   const tutte = [];
   ris.forEach((r, i) => {
     if (r.status === "fulfilled") tutte.push(...r.value);
-    else errori.push(FONTI[chiavi[i]].nome);
+    else errori.push([FONTI[chiavi[i]].nome, r.reason?.message || "errore"]);
   });
 
   const visti = new Set();
@@ -235,10 +235,17 @@ async function carica() {
   $("spinner").hidden = true;
   $("ricarica").disabled = false;
   $("errori").hidden = !errori.length;
-  $("errori").textContent = errori.length
-    ? `Non è stato possibile aggiornare: ${errori.join(", ")}. Le altre testate sono visibili.`
-    : "";
-  $("aggiornato").textContent = `Aggiornato alle ${fmtHM.format(new Date())}`;
+  $("errori").innerHTML = "";
+  if (errori.length) {
+    $("errori").append("Non è stato possibile aggiornare alcune testate. Le altre sono visibili.");
+    const ul = document.createElement("ul");
+    for (const [nome, msg] of errori) {
+      const li = document.createElement("li");
+      li.textContent = `${nome}: ${msg.slice(0, 160)}`;
+      ul.appendChild(li);
+    }
+    $("errori").appendChild(ul);
+  }
   disegnaTab();
   render();
 }

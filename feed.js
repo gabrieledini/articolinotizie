@@ -5,6 +5,8 @@
 
 const gnews = (q) =>
   "https://news.google.com/rss/search?q=" + encodeURIComponent(q) + "&hl=it&gl=IT&ceid=IT:it";
+const bing = (q) =>
+  "https://www.bing.com/news/search?format=rss&setlang=it-IT&cc=IT&q=" + encodeURIComponent(q);
 
 const FEEDS = {
   open: ["https://www.open.online/feed/"],
@@ -16,14 +18,17 @@ const FEEDS = {
   nazione_vg: [
     "https://www.lanazione.it/viareggio/rss",
     gnews("site:lanazione.it inurl:viareggio when:7d"),
+    bing("site:lanazione.it Viareggio"),
   ],
   tirreno_vg: [
     "https://www.iltirreno.it/versilia/rss",
     gnews("site:iltirreno.it inurl:versilia when:7d"),
+    bing("site:iltirreno.it Versilia"),
   ],
   versiliatoday: [
     "https://www.versiliatoday.it/feed/",
     gnews("site:versiliatoday.it when:7d"),
+    bing("site:versiliatoday.it"),
   ],
 };
 
@@ -35,7 +40,8 @@ const CORS = {
 async function scarica(url, ms) {
   const r = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; Notizie/1.0)",
+      "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36",
+      "Accept-Language": "it-IT,it;q=0.9",
       Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
     },
     signal: AbortSignal.timeout(ms),
@@ -63,12 +69,13 @@ exports.handler = async (event) => {
   const urls = FEEDS[src];
   if (!urls) return { statusCode: 400, headers: CORS, body: `Fonte sconosciuta: ${src}` };
 
+  // Tutti gli URL partono insieme (niente attese in cascata oltre i 10 s di Netlify);
+  // vince il primo valido nell'ordine di FEEDS, cioè il feed diretto se funziona.
+  const tentativi = urls.map((u) => scarica(u, 8000).then((xml) => ({ xml }), (e) => ({ e: e.message })));
   const errori = [];
-  for (let i = 0; i < urls.length; i++) {
-    // Con un'alternativa disponibile il primo tentativo è più breve (limite Netlify 10 s)
-    const ms = i < urls.length - 1 ? 3500 : 5500;
-    try {
-      const xml = await scarica(urls[i], ms);
+  for (const t of tentativi) {
+    const r = await t;
+    if (r.xml) {
       return {
         statusCode: 200,
         headers: {
@@ -76,11 +83,10 @@ exports.handler = async (event) => {
           "Content-Type": "application/xml; charset=utf-8",
           "Cache-Control": "public, max-age=120, s-maxage=120",
         },
-        body: xml,
+        body: r.xml,
       };
-    } catch (e) {
-      errori.push(e.message);
     }
+    errori.push(r.e);
   }
   return { statusCode: 502, headers: CORS, body: `${src} non raggiungibile (${errori.join("; ")})` };
 };
