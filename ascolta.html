@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0066CC">
+<title>Ascolta le notizie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blu:#0066CC; --blu-scuro:#004C99; --bg:#F2F5F8; --card:#fff; --ink:#1A1A1A; --muted:#5C6F82;
+  --line:#D5DDE5; --now:#E6F0FA;
+  --open:#D9364F; --internazionale:#8A2BE2; --ansa:#008055; --adnkronos:#CC7A00;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#0F161D; --card:#17212B; --ink:#E8EEF3; --muted:#9FB0C0; --line:#2A3846; --now:#1C3550;
+    --blu:#4D9BEA; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Titillium Web",system-ui,sans-serif;
+  padding-bottom:calc(7rem + env(safe-area-inset-bottom,0px))}
+header{background:#0066CC;color:#fff;padding:calc(.9rem + env(safe-area-inset-top,0px)) 1rem .9rem}
+header .in{max-width:44rem;margin:0 auto;display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+h1{margin:0;font-size:1.45rem;font-weight:700}
+#ora{font-size:.95rem;opacity:.9}
+main{max-width:44rem;margin:0 auto;padding:1rem}
+.opts{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem}
+select{font:inherit;padding:.4rem .6rem;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.chk{display:flex;align-items:center;gap:.35rem;font-size:.95rem}
+.chk input{accent-color:var(--blu);width:1.1rem;height:1.1rem}
+#stato{color:var(--muted);margin:.4rem 0 .8rem}
+ol{list-style:none;margin:0;padding:0;display:grid;gap:.6rem}
+li{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--c,var(--blu));
+  border-radius:6px;padding:.7rem .85rem;cursor:pointer}
+li.now{background:var(--now);border-color:var(--blu);border-left-color:var(--c,var(--blu))}
+li.done{opacity:.55}
+.meta{font-size:.85rem;color:var(--muted);font-weight:600}
+.tit{font-weight:700;font-size:1.08rem;line-height:1.3;margin:.15rem 0 0}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  padding:.7rem 1rem calc(.7rem + env(safe-area-inset-bottom,0px))}
+.bar .in{max-width:44rem;margin:0 auto;display:flex;gap:.6rem}
+button{font:inherit;font-weight:700;border-radius:6px;cursor:pointer}
+#play{flex:1;padding:.85rem;border:0;background:#0066CC;color:#fff;font-size:1.1rem}
+#stop,#agg{padding:.85rem 1rem;border:2px solid #0066CC;background:transparent;color:var(--blu)}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,select:focus-visible,li:focus-visible{outline:3px solid #FFB400;outline-offset:2px}
+</style>
+</head>
+<body>
+<header><div class="in"><h1>Ascolta le notizie</h1><span id="ora"></span></div></header>
+<main>
+  <div class="opts">
+    <select id="finestra" aria-label="Periodo">
+      <option value="60">Ultima ora</option>
+      <option value="180">Ultime 3 ore</option>
+      <option value="360">Ultime 6 ore</option>
+    </select>
+    <select id="vel" aria-label="Velocità">
+      <option value="0.9">Lenta</option>
+      <option value="1" selected>Normale</option>
+      <option value="1.2">Veloce</option>
+      <option value="1.4">Molto veloce</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="somm" checked> Leggi il sommario</label>
+  </div>
+  <select id="voce" aria-label="Voce" style="width:100%;margin-bottom:.6rem"></select>
+  <p id="stato">Caricamento…</p>
+  <ol id="lista"></ol>
+</main>
+
+<div class="bar"><div class="in">
+  <button id="stop" type="button" disabled>Ferma</button>
+  <button id="play" type="button" disabled>▶ Leggi</button>
+  <button id="agg" type="button" aria-label="Aggiorna">↻</button>
+</div></div>
+
+<script>
+// Stesso proxy dell'app Notizie. URL assoluto: funziona sia dentro lo stesso sito sia altrove (se feed.js manda i CORS).
+const PROXY = "https://shimmering-zabaione-8dd2a5.netlify.app/.netlify/functions/feed?src=";
+const FONTI = { open:"Open", internazionale:"Internazionale", ansa:"ANSA", adnkronos:"Adnkronos" };
+const MAX_SOMMARIO = 320;
+
+const $ = id => document.getElementById(id);
+const synth = window.speechSynthesis;
+const store = { get:k=>{try{return localStorage.getItem(k)}catch{return null}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}} };
+
+let tutte = [], notizie = [], idx = 0, stato = "idle", run = 0, wake = null;
+
+/* ---------- orologio ---------- */
+const fOra = new Intl.DateTimeFormat("it-IT",{hour:"2-digit",minute:"2-digit"});
+setInterval(()=>$("ora").textContent=fOra.format(new Date()),15000); $("ora").textContent=fOra.format(new Date());
+
+/* ---------- feed ---------- */
+const pulisci = h => h ? (new DOMParser().parseFromString(h,"text/html").body.textContent||"").replace(/\s+/g," ").trim() : "";
+const primo = (el,...n) => { for(const x of n){ const e=el.getElementsByTagName(x)[0]; if(e) return e; } return null; };
+
+function parse(xmlText, src){
+  const xml = new DOMParser().parseFromString(xmlText,"application/xml");
+  if (xml.getElementsByTagName("parsererror").length) return [];
+  return [...xml.getElementsByTagName("item"), ...xml.getElementsByTagName("entry")].map(it=>{
+    const titolo = pulisci(primo(it,"title")?.textContent);
+    const d = new Date(primo(it,"pubDate","dc:date","published","updated")?.textContent||"");
+    let desc = pulisci(primo(it,"description","summary")?.textContent);
+    if (desc === titolo) desc = "";
+    return { src, titolo, desc, ts: isNaN(d) ? 0 : d.getTime() };
+  }).filter(n=>n.titolo);
+}
+
+async function carica(){
+  stop();
+  $("stato").textContent = "Caricamento…";
+  const risultati = await Promise.allSettled(Object.keys(FONTI).map(async src=>{
+    const r = await fetch(PROXY+src, {cache:"no-store"});
+    if(!r.ok) throw new Error(src);
+    return parse(await r.text(), src);
+  }));
+  const ko = Object.keys(FONTI).filter((_,i)=>risultati[i].status!=="fulfilled");
+  const visti = new Set();
+  tutte = risultati.flatMap(r=>r.status==="fulfilled"?r.value:[])
+    .sort((a,b)=>b.ts-a.ts)
+    .filter(n=>{ const k=n.titolo.toLowerCase().replace(/[^a-zà-ù0-9]/g,"").slice(0,60); if(visti.has(k)) return false; visti.add(k); return true; });
+  filtra();
+  if (ko.length) $("stato").textContent += ` · Non disponibili: ${ko.map(k=>FONTI[k]).join(", ")}`;
+}
+
+function filtra(){
+  const min = +$("finestra").value;
+  const limite = Date.now() - min*60000;
+  notizie = tutte.filter(n=>n.ts>=limite);
+  idx = 0;
+  disegna();
+  $("stato").textContent = notizie.length
+    ? `${notizie.length} notizie, dalla più recente`
+    : "Nessuna notizia nel periodo scelto: prova ad allargarlo.";
+  $("play").disabled = !notizie.length || !synth;
+}
+
+function disegna(){
+  const fmt = new Intl.DateTimeFormat("it-IT",{hour:"2-digit",minute:"2-digit"});
+  $("lista").innerHTML = "";
+  notizie.forEach((n,i)=>{
+    const li = document.createElement("li");
+    li.tabIndex = 0; li.dataset.i = i;
+    li.style.setProperty("--c", `var(--${n.src})`);
+    li.innerHTML = `<div class="meta"></div><p class="tit"></p>`;
+    li.querySelector(".meta").textContent = `${FONTI[n.src]} · ${n.ts?fmt.format(n.ts):""}`;
+    li.querySelector(".tit").textContent = n.titolo;
+    li.onclick = () => avvia(i);
+    li.onkeydown = e => { if(e.key==="Enter") avvia(i); };
+    $("lista").appendChild(li);
+  });
+}
+
+/* ---------- voci ---------- */
+function caricaVoci(){
+  const v = synth.getVoices(); if(!v.length) return;
+  const it = v.filter(x=>x.lang.toLowerCase().startsWith("it"));
+  const lista = it.length ? it : v;
+  $("voce").innerHTML = lista.map(x=>`<option value="${x.voiceURI}">${x.name} (${x.lang})</option>`).join("");
+  const s = store.get("ascolta.voce"); if(s && lista.some(x=>x.voiceURI===s)) $("voce").value = s;
+}
+if (synth){ caricaVoci(); synth.onvoiceschanged = caricaVoci; }
+$("voce").onchange = ()=>{ store.set("ascolta.voce",$("voce").value); riavvia(); };
+$("vel").value = store.get("ascolta.vel") || "1";
+$("vel").onchange = ()=>{ store.set("ascolta.vel",$("vel").value); riavvia(); };
+$("somm").checked = store.get("ascolta.somm") !== "0";
+$("somm").onchange = ()=>store.set("ascolta.somm",$("somm").checked?"1":"0");
+$("finestra").value = store.get("ascolta.fin") || "60";
+$("finestra").onchange = ()=>{ store.set("ascolta.fin",$("finestra").value); stop(); filtra(); };
+
+/* ---------- lettura ---------- */
+function testoDa(n){
+  const ora = n.ts ? new Date(n.ts) : null;
+  let t = `${FONTI[n.src]}${ora?`, ore ${ora.getHours()} e ${String(ora.getMinutes()).padStart(2,"0")}`:""}. ${n.titolo}.`;
+  if ($("somm").checked && n.desc){
+    let d = n.desc;
+    if (d.length > MAX_SOMMARIO){ const cut = d.slice(0,MAX_SOMMARIO); d = cut.slice(0, Math.max(cut.lastIndexOf(". ")+1, cut.lastIndexOf(" "))) ; }
+    t += " " + d;
+  }
+  // frasi corte: Chrome su Android si blocca con le utterance lunghe
+  return t.match(/[^.!?;]+[.!?;]*/g).map(s=>s.trim()).filter(Boolean);
+}
+
+function evidenzia(){
+  document.querySelectorAll("#lista li").forEach((li,i)=>{
+    li.classList.toggle("now", i===idx && stato!=="idle");
+    li.classList.toggle("done", i<idx && stato!=="idle");
+  });
+  const cur = document.querySelector("#lista li.now");
+  if (cur) cur.scrollIntoView({block:"center",behavior:"smooth"});
+}
+
+function leggi(r){
+  if (r!==run || stato!=="playing") return;
+  if (idx >= notizie.length){ fine(); return; }
+  evidenzia();
+  const frasi = testoDa(notizie[idx]);
+  const voce = synth.getVoices().find(v=>v.voiceURI===$("voce").value);
+  let k = 0;
+  const parla = () => {
+    if (r!==run) return;
+    if (k >= frasi.length){ idx++; setTimeout(()=>leggi(r), 450); return; } // breve pausa tra notizie
+    const u = new SpeechSynthesisUtterance(frasi[k++]);
+    if (voce){ u.voice = voce; u.lang = voce.lang; } else u.lang = "it-IT";
+    u.rate = +$("vel").value;
+    u.onend = parla;
+    u.onerror = e => { if (e.error!=="interrupted" && e.error!=="canceled") parla(); };
+    synth.speak(u);
+  };
+  parla();
+}
+
+function avvia(i){
+  run++; synth.cancel();
+  idx = i; stato = "playing"; ui(); tieniSchermo(true);
+  const r = run; setTimeout(()=>leggi(r), 80);
+}
+function pausa(){ run++; synth.cancel(); stato = "paused"; ui(); tieniSchermo(false); } // la ripresa riparte dall'inizio della notizia corrente
+function stop(){ run++; if(synth) synth.cancel(); stato = "idle"; idx = 0; ui(); evidenzia(); tieniSchermo(false); }
+function fine(){ stato = "idle"; ui(); evidenzia(); tieniSchermo(false); $("stato").textContent = "Lettura terminata."; }
+function riavvia(){ if (stato==="playing") avvia(idx); }
+
+function ui(){
+  $("play").textContent = stato==="playing" ? "❚❚ Pausa" : stato==="paused" ? "▶ Riprendi" : "▶ Leggi";
+  $("stop").disabled = stato==="idle";
+}
+
+$("play").onclick = () => stato==="playing" ? pausa() : stato==="paused" ? avvia(idx) : avvia(0);
+$("stop").onclick = stop;
+$("agg").onclick = carica;
+
+/* schermo acceso durante la lettura: col telefono bloccato il browser spesso interrompe la voce */
+async function tieniSchermo(on){
+  try{
+    if (on && "wakeLock" in navigator && !wake) wake = await navigator.wakeLock.request("screen");
+    if (!on && wake){ await wake.release(); wake = null; }
+  }catch{}
+}
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible" && stato==="playing"){ wake=null; tieniSchermo(true); }});
+
+if (!synth){ $("stato").textContent = "Questo browser non supporta la sintesi vocale."; }
+else carica();
+</script>
+</body>
+</html>
