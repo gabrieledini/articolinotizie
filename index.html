@@ -46,6 +46,9 @@
   .fonte-internazionale { --colore-fonte: #008758; }
   .fonte-ansa           { --colore-fonte: #0066cc; }
   .fonte-adnkronos      { --colore-fonte: #995c00; }
+  .fonte-nazione_vg     { --colore-fonte: #003366; }
+  .fonte-tirreno_vg     { --colore-fonte: #cc334d; }
+  .fonte-versiliatoday  { --colore-fonte: #00a3a3; }
   .notizia .category { color: var(--colore-fonte); }
 </style>
 </head>
@@ -68,7 +71,7 @@
           <div class="it-brand-wrapper">
             <div class="it-brand-text">
               <div class="it-brand-title">Notizie</div>
-              <div class="it-brand-tagline d-none d-md-block">Le ultime da Open, Internazionale, ANSA e Adnkronos</div>
+              <div class="it-brand-tagline d-none d-md-block">Le ultime da Open, Internazionale, ANSA, Adnkronos e da Viareggio</div>
             </div>
           </div>
         </div>
@@ -124,7 +127,13 @@ const FONTI = {
   internazionale: { nome: "Internazionale" },
   ansa:           { nome: "ANSA" },
   adnkronos:      { nome: "Adnkronos" },
+  nazione_vg:     { nome: "La Nazione Viareggio", gruppo: "viareggio" },
+  tirreno_vg:     { nome: "Il Tirreno Versilia",  gruppo: "viareggio" },
+  versiliatoday:  { nome: "Versilia Today",       gruppo: "viareggio" },
 };
+const corrisponde = (n, k) =>
+  !k || n.src === k || (k === "@viareggio" && FONTI[n.src].gruppo === "viareggio");
+
 const PROXY = "/.netlify/functions/feed?src=";
 const MAX_PER_FONTE = 40;
 const REFRESH_MS = 5 * 60 * 1000;
@@ -140,10 +149,11 @@ tick(); setInterval(tick, 30000);
 
 // Tab filtri
 function disegnaTab() {
-  const voci = [[null, "Tutte"], ...Object.entries(FONTI).map(([k, v]) => [k, v.nome])];
+  const voci = [[null, "Tutte"], ["@viareggio", "Viareggio"],
+    ...Object.entries(FONTI).map(([k, v]) => [k, v.nome])];
   $("tabs").innerHTML = "";
   for (const [k, nome] of voci) {
-    const n = k ? notizie.filter((x) => x.src === k).length : notizie.length;
+    const n = notizie.filter((x) => corrisponde(x, k)).length;
     const li = document.createElement("li");
     li.className = "nav-item";
     li.setAttribute("role", "presentation");
@@ -159,7 +169,7 @@ function disegnaTab() {
       c.textContent = n;
       b.appendChild(c);
     }
-    b.addEventListener("click", () => { filtro = k; disegnaTab(); render(); });
+    b.addEventListener("click", () => { filtro = k; disegnaTab(); render(); window.scrollTo({ top: 0 }); });
     li.appendChild(b);
     $("tabs").appendChild(li);
   }
@@ -180,7 +190,9 @@ function parseFeed(xmlText, src) {
   if (xml.getElementsByTagName("parsererror").length) throw new Error("XML non valido");
   const items = [...xml.getElementsByTagName("item"), ...xml.getElementsByTagName("entry")];
   return items.slice(0, MAX_PER_FONTE).map((it) => {
-    const titolo = testoPulito(primo(it, "title")?.textContent);
+    // Google News aggiunge " - Testata" in coda al titolo
+    const titolo = testoPulito(primo(it, "title")?.textContent)
+      .replace(/\s+-\s+(La Nazione|Il Tirreno|Versilia Today)$/i, "");
     const linkEl = primo(it, "link");
     const link = linkEl?.getAttribute("href") || linkEl?.textContent?.trim() || "";
     const dataTxt = primo(it, "pubDate", "dc:date", "published", "updated")?.textContent;
@@ -189,7 +201,7 @@ function parseFeed(xmlText, src) {
     return {
       src, titolo, link,
       ts: data && !isNaN(data) ? data.getTime() : 0,
-      desc: desc && desc !== titolo ? desc.slice(0, 400) : "",
+      desc: desc && !desc.startsWith(titolo) ? desc.slice(0, 400) : "",
     };
   }).filter((n) => n.titolo);
 }
@@ -240,7 +252,7 @@ function quando(ts) {
 function render() {
   const lista = $("lista");
   lista.innerHTML = "";
-  const elenco = filtro ? notizie.filter((n) => n.src === filtro) : notizie;
+  const elenco = notizie.filter((n) => corrisponde(n, filtro));
   $("vuoto").hidden = elenco.length > 0 || !$("spinner").hidden;
 
   const frag = document.createDocumentFragment();
