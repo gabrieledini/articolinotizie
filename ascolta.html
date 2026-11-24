@@ -21,7 +21,7 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:"Titillium Web",system-ui,sans-serif;
-  padding-bottom:calc(7rem + env(safe-area-inset-bottom,0px))}
+  padding-bottom:calc(12rem + env(safe-area-inset-bottom,0px))}
 header{background:#0066CC;color:#fff;padding:calc(.9rem + env(safe-area-inset-top,0px)) 1rem .9rem}
 header .in{max-width:44rem;margin:0 auto;display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
 h1{margin:0;font-size:1.45rem;font-weight:700}
@@ -39,7 +39,7 @@ li.now{background:var(--now);border-color:var(--blu);border-left-color:var(--c,v
 li.done{opacity:.55}
 .meta{font-size:.85rem;color:var(--muted);font-weight:600}
 .tit{font-weight:700;font-size:1.08rem;line-height:1.3;margin:.15rem 0 0}
-.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+.bar{position:fixed;left:0;right:0;bottom:calc(4.5rem + env(safe-area-inset-bottom,0px));border-bottom:1px solid var(--line);background:var(--card);border-top:1px solid var(--line);
   padding:.7rem 1rem calc(.7rem + env(safe-area-inset-bottom,0px))}
 .bar .in{max-width:44rem;margin:0 auto;display:flex;gap:.6rem}
 button{font:inherit;font-weight:700;border-radius:6px;cursor:pointer}
@@ -52,20 +52,6 @@ button:focus-visible,select:focus-visible,li:focus-visible{outline:3px solid #FF
 <body>
 <header><div class="in"><h1>Ascolta le notizie</h1><span id="ora"></span></div></header>
 <main>
-  <div class="opts">
-    <select id="finestra" aria-label="Periodo">
-      <option value="60">Ultima ora</option>
-      <option value="180">Ultime 3 ore</option>
-      <option value="360">Ultime 6 ore</option>
-    </select>
-    <select id="vel" aria-label="Velocità">
-      <option value="0.9">Lenta</option>
-      <option value="1" selected>Normale</option>
-      <option value="1.2">Veloce</option>
-      <option value="1.4">Molto veloce</option>
-    </select>
-    <label class="chk"><input type="checkbox" id="somm" checked> Leggi il sommario</label>
-  </div>
   <select id="voce" aria-label="Voce" style="width:100%;margin-bottom:.6rem"></select>
   <p id="stato">Caricamento…</p>
   <ol id="lista"></ol>
@@ -81,7 +67,8 @@ button:focus-visible,select:focus-visible,li:focus-visible{outline:3px solid #FF
 // Stesso proxy dell'app Notizie. URL assoluto: funziona sia dentro lo stesso sito sia altrove (se feed.js manda i CORS).
 const PROXY = "https://shimmering-zabaione-8dd2a5.netlify.app/.netlify/functions/feed?src=";
 const FONTI = { open:"Open", internazionale:"Internazionale", ansa:"ANSA", adnkronos:"Adnkronos" };
-const MAX_SOMMARIO = 320;
+const FINESTRA_MIN = 60;   // ultima ora
+const VELOCITA = 1.4;      // molto veloce
 
 const $ = id => document.getElementById(id);
 const synth = window.speechSynthesis;
@@ -127,14 +114,14 @@ async function carica(){
 }
 
 function filtra(){
-  const min = +$("finestra").value;
+  const min = FINESTRA_MIN;
   const limite = Date.now() - min*60000;
   notizie = tutte.filter(n=>n.ts>=limite);
   idx = 0;
   disegna();
   $("stato").textContent = notizie.length
     ? `${notizie.length} notizie, dalla più recente`
-    : "Nessuna notizia nel periodo scelto: prova ad allargarlo.";
+    : "Nessuna notizia nell'ultima ora.";
   $("play").disabled = !notizie.length || !synth;
 }
 
@@ -164,24 +151,11 @@ function caricaVoci(){
 }
 if (synth){ caricaVoci(); synth.onvoiceschanged = caricaVoci; }
 $("voce").onchange = ()=>{ store.set("ascolta.voce",$("voce").value); riavvia(); };
-$("vel").value = store.get("ascolta.vel") || "1";
-$("vel").onchange = ()=>{ store.set("ascolta.vel",$("vel").value); riavvia(); };
-$("somm").checked = store.get("ascolta.somm") !== "0";
-$("somm").onchange = ()=>store.set("ascolta.somm",$("somm").checked?"1":"0");
-$("finestra").value = store.get("ascolta.fin") || "60";
-$("finestra").onchange = ()=>{ store.set("ascolta.fin",$("finestra").value); stop(); filtra(); };
 
 /* ---------- lettura ---------- */
 function testoDa(n){
-  const ora = n.ts ? new Date(n.ts) : null;
-  let t = `${FONTI[n.src]}${ora?`, ore ${ora.getHours()} e ${String(ora.getMinutes()).padStart(2,"0")}`:""}. ${n.titolo}.`;
-  if ($("somm").checked && n.desc){
-    let d = n.desc;
-    if (d.length > MAX_SOMMARIO){ const cut = d.slice(0,MAX_SOMMARIO); d = cut.slice(0, Math.max(cut.lastIndexOf(". ")+1, cut.lastIndexOf(" "))) ; }
-    t += " " + d;
-  }
-  // frasi corte: Chrome su Android si blocca con le utterance lunghe
-  return t.match(/[^.!?;]+[.!?;]*/g).map(s=>s.trim()).filter(Boolean);
+  // solo il titolo della card, spezzato in frasi (Chrome su Android si blocca con le utterance lunghe)
+  return (n.titolo.match(/[^.!?;]+[.!?;]*/g)||[n.titolo]).map(x=>x.trim()).filter(Boolean);
 }
 
 function evidenzia(){
@@ -205,7 +179,7 @@ function leggi(r){
     if (k >= frasi.length){ idx++; setTimeout(()=>leggi(r), 450); return; } // breve pausa tra notizie
     const u = new SpeechSynthesisUtterance(frasi[k++]);
     if (voce){ u.voice = voce; u.lang = voce.lang; } else u.lang = "it-IT";
-    u.rate = +$("vel").value;
+    u.rate = VELOCITA;
     u.onend = parla;
     u.onerror = e => { if (e.error!=="interrupted" && e.error!=="canceled") parla(); };
     synth.speak(u);
