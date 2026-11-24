@@ -52,7 +52,6 @@ button:focus-visible,select:focus-visible,li:focus-visible{outline:3px solid #FF
 <body>
 <header><div class="in"><h1>Ascolta le notizie</h1><span id="ora"></span></div></header>
 <main>
-  <select id="voce" aria-label="Voce" style="width:100%;margin-bottom:.6rem"></select>
   <p id="stato">Caricamento…</p>
   <ol id="lista"></ol>
 </main>
@@ -141,16 +140,11 @@ function disegna(){
   });
 }
 
-/* ---------- voci ---------- */
-function caricaVoci(){
-  const v = synth.getVoices(); if(!v.length) return;
-  const it = v.filter(x=>x.lang.toLowerCase().startsWith("it"));
-  const lista = it.length ? it : v;
-  $("voce").innerHTML = lista.map(x=>`<option value="${x.voiceURI}">${x.name} (${x.lang})</option>`).join("");
-  const s = store.get("ascolta.voce"); if(s && lista.some(x=>x.voiceURI===s)) $("voce").value = s;
+/* ---------- voce: prima italiana disponibile (preferisce quelle locali, più affidabili) ---------- */
+function voceItaliana(){
+  const it = synth.getVoices().filter(v=>v.lang.toLowerCase().startsWith("it"));
+  return it.find(v=>v.localService) || it[0] || null;
 }
-if (synth){ caricaVoci(); synth.onvoiceschanged = caricaVoci; }
-$("voce").onchange = ()=>{ store.set("ascolta.voce",$("voce").value); riavvia(); };
 
 /* ---------- lettura ---------- */
 function testoDa(n){
@@ -172,7 +166,7 @@ function leggi(r){
   if (idx >= notizie.length){ fine(); return; }
   evidenzia();
   const frasi = testoDa(notizie[idx]);
-  const voce = synth.getVoices().find(v=>v.voiceURI===$("voce").value);
+  const voce = voceItaliana();
   let k = 0;
   const parla = () => {
     if (r!==run) return;
