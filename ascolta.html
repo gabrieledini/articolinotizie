@@ -24,14 +24,12 @@
   .lettore {
     position: sticky; bottom: 0; z-index: 5; background: #fff;
     box-shadow: 0 -2px 8px rgba(0,0,0,.08);
-    padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 12px 0 calc(84px + env(safe-area-inset-bottom, 0px));
   }
   .comandi { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   .comandi .btn { min-width: 64px; }
   .ora-legge { font-size: .875rem; color: #5d7083; text-align: center; margin-bottom: 8px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .opzioni { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
-  .opzioni > div { flex: 1 1 160px; }
 
   .voce { cursor: pointer; border-left: 4px solid transparent; }
   .voce.attiva { border-left-color: #0066cc; background: #e6f0fa; }
@@ -66,21 +64,6 @@
   <div class="scelta mb-4" role="group" aria-label="Quali notizie ascoltare">
     <button type="button" class="btn btn-outline-primary" data-gruppo="viareggio">Viareggio</button>
     <button type="button" class="btn btn-outline-primary" data-gruppo="altre">Altre notizie</button>
-  </div>
-
-  <div class="opzioni mb-4">
-    <div>
-      <label for="voce" class="form-label small mb-1">Voce</label>
-      <select id="voce" class="form-select"></select>
-    </div>
-    <div>
-      <label for="velocita" class="form-label small mb-1">Velocità <span id="velTxt"></span></label>
-      <input type="range" id="velocita" class="form-range" min="0.7" max="1.6" step="0.1" value="1">
-    </div>
-    <div class="form-check">
-      <input id="sommario" type="checkbox" class="form-check-input">
-      <label for="sommario" class="form-check-label">Leggi anche il sommario</label>
-    </div>
   </div>
 
   <div class="alert alert-warning" role="alert" id="errori" hidden></div>
@@ -126,33 +109,16 @@ let wakeLock = null;
 const pref = (() => { try { return JSON.parse(localStorage.getItem("ascolta") || "{}"); } catch { return {}; } })();
 const salva = () => { try { localStorage.setItem("ascolta", JSON.stringify(pref)); } catch {} };
 
-$("velocita").value = pref.velocita || 1;
-$("sommario").checked = !!pref.sommario;
-const mostraVel = () => { $("velTxt").textContent = `${Number($("velocita").value).toFixed(1)}×`; };
-mostraVel();
-$("velocita").addEventListener("input", () => { mostraVel(); pref.velocita = Number($("velocita").value); salva(); });
-$("sommario").addEventListener("change", () => { pref.sommario = $("sommario").checked; salva(); });
 
-// ---------- Voci ----------
-function caricaVoci() {
-  const voci = synth.getVoices();
-  if (!voci.length) return;
-  const it = voci.filter((v) => v.lang.toLowerCase().startsWith("it"));
-  const elenco = it.length ? it : voci;
-  $("voce").innerHTML = "";
-  for (const v of elenco) {
-    const o = document.createElement("option");
-    o.value = v.name;
-    o.textContent = `${v.name}${v.localService ? "" : " (online)"}`;
-    $("voce").appendChild(o);
-  }
-  const preferita = elenco.find((v) => v.name === pref.voce)
-    || elenco.find((v) => /google/i.test(v.name)) || elenco[0];
-  if (preferita) $("voce").value = preferita.name;
+// ---------- Voce ----------
+const VELOCITA = 1.3;
+let voceScelta = null;
+function scegliVoce() {
+  const it = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith("it"));
+  voceScelta = it.find((v) => /google/i.test(v.name)) || it.find((v) => v.localService) || it[0] || null;
 }
-caricaVoci();
-synth.addEventListener?.("voiceschanged", caricaVoci);
-$("voce").addEventListener("change", () => { pref.voce = $("voce").value; salva(); });
+scegliVoce();
+synth.addEventListener?.("voiceschanged", scegliVoce);
 
 // ---------- Feed ----------
 function testoPulito(html) {
@@ -263,9 +229,7 @@ function evidenzia() {
 let token = 0;
 
 function testoDa(n) {
-  let t = `${n.fonte}. ${n.titolo}.`;
-  if ($("sommario").checked && n.desc) t += ` ${n.desc}`;
-  return t;
+  return `${n.fonte}. ${n.titolo}.`;
 }
 
 function leggi() {
@@ -278,10 +242,10 @@ function leggi() {
   evidenzia();
 
   const u = new SpeechSynthesisUtterance(testoDa(notizie[indice]));
-  const voce = synth.getVoices().find((v) => v.name === $("voce").value);
-  if (voce) u.voice = voce;
-  u.lang = voce?.lang || "it-IT";
-  u.rate = Number($("velocita").value);
+  if (!voceScelta) scegliVoce();
+  if (voceScelta) u.voice = voceScelta;
+  u.lang = voceScelta?.lang || "it-IT";
+  u.rate = VELOCITA;
   u.onend = () => {
     if (mio !== token || stato !== "legge") return;
     if (indice < notizie.length - 1) { indice++; setTimeout(() => mio === token && leggi(), 400); }
