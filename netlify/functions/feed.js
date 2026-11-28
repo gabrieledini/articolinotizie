@@ -77,6 +77,8 @@ async function daPagina({ pagina, sezione, nome }, ms) {
   const base = new URL(pagina).origin;
   const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const decod = (t) => t
+    // il sito usa CSS-in-JS: dentro i link ci sono blocchi <style> da scartare
+    .replace(/<(style|script|noscript|svg)\b[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
     .replace(/&quot;/g, '"').replace(/&apos;|&#039;|&rsquo;/g, "’").replace(/&amp;/g, "&")
@@ -91,10 +93,14 @@ async function daPagina({ pagina, sezione, nome }, ms) {
     if (!href.startsWith(base) || !href.includes(sezione)) continue;
     const d = href.match(/\/(\d{4})\/(\d{2})\/(\d{2})\/news\//);
     if (!d) continue;
-    const titolo = decod(m[2]);
-    if (titolo.length < 15) continue; // salta link-immagine e "leggi"
-    if (!visti.has(href) || visti.get(href).titolo.length < titolo.length) {
-      visti.set(href, { titolo, data: new Date(`${d[1]}-${d[2]}-${d[3]}T12:00:00Z`) });
+    // Se nel link c'è un titolo (h1-h4) uso quello, altrimenti tutto il testo del link
+    const h = m[2].match(/<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>/i);
+    const titolo = decod(h ? h[1] : m[2]);
+    if (titolo.length < 15 || titolo.length > 250) continue; // link-immagine, "leggi", blocchi interi
+    if (/[{};]|:\s*\d+px|css-/.test(titolo)) continue;        // residui di CSS
+    const vecchio = visti.get(href);
+    if (!vecchio || (h && !vecchio.h) || (!!h === !!vecchio.h && vecchio.titolo.length < titolo.length)) {
+      visti.set(href, { titolo, h: !!h, data: new Date(`${d[1]}-${d[2]}-${d[3]}T12:00:00Z`) });
     }
   }
   if (!visti.size) throw new Error("nessun articolo nella pagina");
